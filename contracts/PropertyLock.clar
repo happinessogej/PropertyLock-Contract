@@ -312,3 +312,219 @@
         ))
     )
 )
+
+
+;; Define inspection map
+(define-map property-inspections
+    { property-id: uint, inspection-id: uint }
+    {
+        inspector: principal,
+        date: uint,
+        status: (string-ascii 20),
+        findings: (string-ascii 500),
+        next-inspection: uint
+    }
+)
+
+;; Add inspection record
+(define-public (add-inspection-record 
+    (property-id uint) 
+    (inspection-id uint)
+    (status (string-ascii 20))
+    (findings (string-ascii 500))
+    (next-inspection uint))
+    (begin
+        (asserts! (unwrap-panic (is-verified-broker tx-sender)) (err u110))
+        (ok (map-set property-inspections
+            { property-id: property-id, inspection-id: inspection-id }
+            {
+                inspector: tx-sender,
+                date: stacks-block-height,
+                status: status,
+                findings: findings,
+                next-inspection: next-inspection
+            }
+        ))
+    )
+)
+
+;; Define insurance map
+(define-map property-insurance
+    { property-id: uint }
+    {
+        provider: (string-ascii 50),
+        policy-number: (string-ascii 30),
+        coverage-amount: uint,
+        start-date: uint,
+        end-date: uint,
+        status: (string-ascii 20)
+    }
+)
+
+;; Add insurance record
+(define-public (add-insurance-record
+    (property-id uint)
+    (provider (string-ascii 50))
+    (policy-number (string-ascii 30))
+    (coverage-amount uint)
+    (duration uint))
+    (begin
+        (asserts! (is-property-owner property-id tx-sender) (err u111))
+        (ok (map-set property-insurance
+            { property-id: property-id }
+            {
+                provider: provider,
+                policy-number: policy-number,
+                coverage-amount: coverage-amount,
+                start-date: stacks-block-height,
+                end-date: (+ stacks-block-height duration),
+                status: "active"
+            }
+        ))
+    )
+)
+
+
+;; Define tax records map
+(define-map property-taxes
+    { property-id: uint, year: uint }
+    {
+        amount: uint,
+        paid-amount: uint,
+        due-date: uint,
+        payment-date: uint,
+        status: (string-ascii 20)
+    }
+)
+
+;; Add tax record
+(define-public (add-tax-record
+    (property-id uint)
+    (year uint)
+    (amount uint)
+    (due-date uint))
+    (begin
+        (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+        (ok (map-set property-taxes
+            { property-id: property-id, year: year }
+            {
+                amount: amount,
+                paid-amount: u0,
+                due-date: due-date,
+                payment-date: u0,
+                status: "pending"
+            }
+        ))
+    )
+)
+
+
+;; Define amenities map
+(define-map property-amenities
+    { property-id: uint }
+    {
+        parking: bool,
+        pool: bool,
+        gym: bool,
+        security: bool,
+        elevator: bool,
+        last-updated: uint
+    }
+)
+
+;; Update amenities
+(define-public (update-amenities
+    (property-id uint)
+    (parking bool)
+    (pool bool)
+    (gym bool)
+    (security bool)
+    (elevator bool))
+    (begin
+        (asserts! (is-property-owner property-id tx-sender) (err u112))
+        (ok (map-set property-amenities
+            { property-id: property-id }
+            {
+                parking: parking,
+                pool: pool,
+                gym: gym,
+                security: security,
+                elevator: elevator,
+                last-updated: stacks-block-height
+            }
+        ))
+    )
+)
+
+
+;; Define occupancy map
+(define-map occupancy-history
+    { property-id: uint, occupant: principal }
+    {
+        start-date: uint,
+        end-date: uint,
+        rent-amount: uint,
+        occupancy-type: (string-ascii 20),
+        status: (string-ascii 20)
+    }
+)
+
+;; Add occupancy record
+(define-public (add-occupancy-record
+    (property-id uint)
+    (occupant principal)
+    (rent-amount uint)
+    (duration uint)
+    (occupancy-type (string-ascii 20)))
+    (begin
+        (asserts! (is-property-owner property-id tx-sender) (err u113))
+        (ok (map-set occupancy-history
+            { property-id: property-id, occupant: occupant }
+            {
+                start-date: stacks-block-height,
+                end-date: (+ stacks-block-height duration),
+                rent-amount: rent-amount,
+                occupancy-type: occupancy-type,
+                status: "active"
+            }
+        ))
+    )
+)
+
+
+;; Define utilities map
+(define-map property-utilities
+    { property-id: uint, month: uint }
+    {
+        electricity: uint,
+        water: uint,
+        gas: uint,
+        internet: uint,
+        payment-status: (string-ascii 20),
+        last-reading-date: uint
+    }
+)
+
+;; Add utility record
+(define-public (add-utility-record
+    (property-id uint)
+    (month uint)
+    (electricity uint)
+    (water uint)
+    (gas uint)
+    (internet uint))
+    (begin
+        (asserts! (is-property-owner property-id tx-sender) (err u114))
+        (ok (map-set property-utilities
+            { property-id: property-id, month: month }
+            {
+                electricity: electricity,
+                water: water,
+                gas: gas,
+                internet: internet,
+                payment-status: "pending",
+                last-reading-date: stacks-block-height
+            }
+        ))
+    )
+)
