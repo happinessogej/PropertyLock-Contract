@@ -528,3 +528,124 @@
         ))
     )
 )
+
+
+(define-map property-valuations
+    { property-id: uint, valuation-id: uint }
+    {
+        appraiser: principal,
+        value: uint,
+        date: uint,
+        valuation-type: (string-ascii 20),
+        supporting-document: (string-ascii 64)
+    }
+)
+
+(define-data-var last-valuation-id uint u0)
+
+(define-public (add-property-valuation 
+    (property-id uint)
+    (value uint)
+    (valuation-type (string-ascii 20))
+    (supporting-document (string-ascii 64)))
+    (let
+        (
+            (new-id (+ (var-get last-valuation-id) u1))
+        )
+        (asserts! (unwrap-panic (is-verified-broker tx-sender)) (err u200))
+        (var-set last-valuation-id new-id)
+        (ok (map-set property-valuations
+            { property-id: property-id, valuation-id: new-id }
+            {
+                appraiser: tx-sender,
+                value: value,
+                date: stacks-block-height,
+                valuation-type: valuation-type,
+                supporting-document: supporting-document
+            }
+        ))
+    )
+)
+
+(define-read-only (get-property-valuation (property-id uint) (valuation-id uint))
+    (map-get? property-valuations { property-id: property-id, valuation-id: valuation-id })
+)
+
+
+(define-public (update-property-valuation 
+    (property-id uint)
+    (valuation-id uint)
+    (value uint)
+    (valuation-type (string-ascii 20))
+    (supporting-document (string-ascii 64)))
+    (begin
+        (asserts! (unwrap-panic (is-verified-broker tx-sender)) (err u201))
+        (ok (map-set property-valuations
+            { property-id: property-id, valuation-id: valuation-id }
+            {
+                appraiser: tx-sender,
+                value: value,
+                date: stacks-block-height,
+                valuation-type: valuation-type,
+                supporting-document: supporting-document
+            }
+        ))
+    )
+)
+(define-public (delete-property-valuation (property-id uint) (valuation-id uint))
+    (begin
+        (asserts! (unwrap-panic (is-verified-broker tx-sender)) (err u202))
+        (ok (map-delete property-valuations { property-id: property-id, valuation-id: valuation-id }))
+    )
+)
+
+(define-map property-access-slots
+    { property-id: uint, slot-id: uint }
+    {
+        visitor: principal,
+        broker: principal,
+        start-time: uint,
+        end-time: uint,
+        status: (string-ascii 20),
+        access-code: (string-ascii 10)
+    }
+)
+
+(define-data-var last-slot-id uint u0)
+
+(define-public (schedule-property-access 
+    (property-id uint)
+    (visitor principal)
+    (start-time uint)
+    (end-time uint)
+    (access-code (string-ascii 10)))
+    (let
+        (
+            (new-slot-id (+ (var-get last-slot-id) u1))
+        )
+        (asserts! (unwrap-panic (is-verified-broker tx-sender)) (err u300))
+        (asserts! (> end-time start-time) (err u301))
+        (var-set last-slot-id new-slot-id)
+        (ok (map-set property-access-slots
+            { property-id: property-id, slot-id: new-slot-id }
+            {
+                visitor: visitor,
+                broker: tx-sender,
+                start-time: start-time,
+                end-time: end-time,
+                status: "scheduled",
+                access-code: access-code
+            }
+        ))
+    )
+)
+
+(define-read-only (verify-access-slot 
+    (property-id uint) 
+    (slot-id uint) 
+    (access-code (string-ascii 10)))
+    (match (map-get? property-access-slots { property-id: property-id, slot-id: slot-id })
+        access-slot (ok (is-eq (get access-code access-slot) access-code))
+        err-not-found
+    )
+)
