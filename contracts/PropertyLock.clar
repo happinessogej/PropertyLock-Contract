@@ -7,6 +7,38 @@
 (define-constant err-not-found (err u101))
 (define-constant err-already-exists (err u102))
 
+
+(define-map property-mortgages
+    { property-id: uint }
+    {
+        lender: principal,
+        borrower: principal,
+        loan-amount: uint,
+        interest-rate: uint,
+        term-months: uint,
+        monthly-payment: uint,
+        start-date: uint,
+        end-date: uint,
+        outstanding-balance: uint,
+        payments-made: uint,
+        status: (string-ascii 20)
+    }
+)
+
+(define-map mortgage-payments
+    { property-id: uint, payment-id: uint }
+    {
+        amount: uint,
+        payment-date: uint,
+        principal-amount: uint,
+        interest-amount: uint,
+        remaining-balance: uint,
+        payment-type: (string-ascii 20)
+    }
+)
+
+(define-data-var last-payment-id uint u0)
+
 ;; Data Maps
 (define-map properties 
     { property-id: uint }
@@ -646,6 +678,215 @@
     (access-code (string-ascii 10)))
     (match (map-get? property-access-slots { property-id: property-id, slot-id: slot-id })
         access-slot (ok (is-eq (get access-code access-slot) access-code))
+        err-not-found
+    )
+)
+
+
+(define-public (update-access-slot 
+    (property-id uint)
+    (slot-id uint)
+    (start-time uint)
+    (end-time uint)
+    (access-code (string-ascii 10)))
+    (begin
+        (asserts! (unwrap-panic (is-verified-broker tx-sender)) (err u302))
+        (asserts! (> end-time start-time) (err u303))
+        (ok (map-set property-access-slots
+            { property-id: property-id, slot-id: slot-id }
+            {
+                visitor: (unwrap-panic (get visitor (map-get? property-access-slots { property-id: property-id, slot-id: slot-id }))),
+                broker: tx-sender,
+                start-time: start-time,
+                end-time: end-time,
+                status: "updated",
+                access-code: access-code
+            }
+        ))
+    )
+)
+
+(define-public (cancel-access-slot (property-id uint) (slot-id uint))
+    (begin
+        (asserts! (unwrap-panic (is-verified-broker tx-sender)) (err u304))
+        (ok (map-set property-access-slots
+            { property-id: property-id, slot-id: slot-id }
+            {
+                visitor: (unwrap-panic (get visitor (map-get? property-access-slots { property-id: property-id, slot-id: slot-id }))),
+                broker: tx-sender,
+                start-time: u0,
+                end-time: u0,
+                status: "cancelled",
+                access-code: ""
+            }
+        ))
+    )
+)
+
+(define-public (create-mortgage
+    (property-id uint)
+    (lender principal)
+    (borrower principal)
+    (loan-amount uint)
+    (interest-rate uint)
+    (term-months uint)
+    (monthly-payment uint))
+    (begin
+        (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+        (asserts! (> loan-amount u0) (err u400))
+        (asserts! (> term-months u0) (err u401))
+        (ok (map-set property-mortgages
+            { property-id: property-id }
+            {
+                lender: lender,
+                borrower: borrower,
+                loan-amount: loan-amount,
+                interest-rate: interest-rate,
+                term-months: term-months,
+                monthly-payment: monthly-payment,
+                start-date: stacks-block-height,
+                end-date: (+ stacks-block-height (* term-months u144)),
+                outstanding-balance: loan-amount,
+                payments-made: u0,
+                status: "active"
+            }
+        ))
+    )
+)
+
+(define-public (record-mortgage-payment
+    (property-id uint)
+    (amount uint)
+    (principal-amount uint)
+    (interest-amount uint))
+    (let
+        (
+            (mortgage (unwrap! (map-get? property-mortgages { property-id: property-id }) err-not-found))
+            (new-payment-id (+ (var-get last-payment-id) u1))
+            (new-balance (- (get outstanding-balance mortgage) principal-amount))
+            (new-payments-count (+ (get payments-made mortgage) u1))
+        )
+        (asserts! (is-eq tx-sender (get borrower mortgage)) (err u402))
+        (asserts! (>= amount (get monthly-payment mortgage)) (err u403))
+        (var-set last-payment-id new-payment-id)
+        (map-set mortgage-payments
+            { property-id: property-id, payment-id: new-payment-id }
+            {
+                amount: amount,
+                payment-date: stacks-block-height,
+                principal-amount: principal-amount,
+                interest-amount: interest-amount,
+                remaining-balance: new-balance,
+                payment-type: "regular"
+            }
+        )
+        (ok (map-set property-mortgages
+            { property-id: property-id }
+            (merge mortgage
+                {
+                    outstanding-balance: new-balance,
+                    payments-made: new-payments-count,
+                    status: (if (is-eq new-balance u0) "paid-off" "active")
+                }
+            )
+        ))
+    )
+)
+
+(define-public (initiate-foreclosure (property-id uint))
+    (let
+        (
+            (mortgage (unwrap! (map-get? property-mortgages { property-id: property-id }) err-not-found))
+        )
+        (asserts! (is-eq tx-sender (get lender mortgage)) (err u404))
+        (asserts! (is-eq (get status mortgage) "active") (err u405))
+        (ok (map-set property-mortgages
+            { property-id: property-id }
+            (merge mortgage { status: "foreclosure" })
+        ))
+    )
+)
+
+(define-public (complete-foreclosure (property-id uint))
+    (let
+        (
+            (mortgage (unwrap! (map-get? property-mortgages { property-id: property-id }) err-not-found))
+            (property (unwrap! (get-property property-id) err-not-found))
+        )
+        (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+        (asserts! (is-eq (get status mortgage) "foreclosure") (err u406))
+        (map-set property-mortgages
+            { property-id: property-id }
+            (merge mortgage { status: "foreclosed" })
+        )
+        (ok (map-set properties
+            { property-id: property-id }
+            (merge property
+                {
+                    owner: (get lender mortgage),
+                    status: "foreclosed"
+                }
+            )
+        ))
+    )
+)
+
+(define-public (refinance-mortgage
+    (property-id uint)
+    (new-loan-amount uint)
+    (new-interest-rate uint)
+    (new-term-months uint)
+    (new-monthly-payment uint))
+    (let
+        (
+            (mortgage (unwrap! (map-get? property-mortgages { property-id: property-id }) err-not-found))
+        )
+        (asserts! (is-eq tx-sender (get borrower mortgage)) (err u407))
+        (asserts! (is-eq (get status mortgage) "active") (err u408))
+        (ok (map-set property-mortgages
+            { property-id: property-id }
+            (merge mortgage
+                {
+                    loan-amount: new-loan-amount,
+                    interest-rate: new-interest-rate,
+                    term-months: new-term-months,
+                    monthly-payment: new-monthly-payment,
+                    outstanding-balance: new-loan-amount,
+                    start-date: stacks-block-height,
+                    end-date: (+ stacks-block-height (* new-term-months u144)),
+                    payments-made: u0,
+                    status: "refinanced"
+                }
+            )
+        ))
+    )
+)
+
+(define-read-only (get-mortgage (property-id uint))
+    (map-get? property-mortgages { property-id: property-id })
+)
+
+(define-read-only (get-mortgage-payment (property-id uint) (payment-id uint))
+    (map-get? mortgage-payments { property-id: property-id, payment-id: payment-id })
+)
+
+(define-read-only (calculate-remaining-payments (property-id uint))
+    (match (get-mortgage property-id)
+        mortgage (ok (- (get term-months mortgage) (get payments-made mortgage)))
+        err-not-found
+    )
+)
+
+(define-read-only (is-mortgage-current (property-id uint))
+    (match (get-mortgage property-id)
+        mortgage 
+        (let
+            (
+                (expected-payments (/ (- stacks-block-height (get start-date mortgage)) u144))
+                (actual-payments (get payments-made mortgage))
+            )
+            (ok (>= actual-payments expected-payments))
+        )
         err-not-found
     )
 )
